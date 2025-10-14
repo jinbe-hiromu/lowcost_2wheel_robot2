@@ -1,0 +1,64 @@
+# -----------------------------------------------------------------------------
+# STM32 / CubeIDE / HAL projects
+# -----------------------------------------------------------------------------
+
+# Build artifacts
+*.o
+*.d
+*.elf
+*.map
+*.bin
+*.hex
+*.lst
+*.srec
+*.dep
+
+# Object and dependency folders
+*/Debug/
+*/Release/
+*/build/
+*/out/
+*/Bin/
+*/Obj/
+*/Objects/
+
+# IDE-specific (STM32CubeIDE / Eclipse)
+.metadata/
+*.launch
+.settings/
+.cproject
+.project
+.loadpath
+.externalToolBuilders/
+*.stm32cubemx
+*.launches
+
+# STM32CubeMX generated code cache
+*.ioc-backup
+*.ioc~*
+
+# Keil, IAR, Atollic, etc. (if mixed environments)
+/RTE/
+/EWARM/
+/MDK-ARM/
+/MDK/
+/AC6/
+
+# Temporary / log files
+*.log
+*.bak
+*.tmp
+*.swp
+*.DS_Store
+Thumbs.db
+
+# System files
+ehthumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Optionally ignore auto-generated CubeMX code (if you don't modify it manually)
+# (Uncomment below if desired)
+# Core/Src/stm32*
+# Core/Inc/stm32*
+# -----------------------------------------------------------------------------
