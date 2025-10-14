@@ -46,6 +46,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
 
@@ -88,6 +89,7 @@ int sensor_threshold = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM1_Init(void);
@@ -115,7 +117,7 @@ void FS90R_SetSpeed(int8_t speed_l, int8_t speed_r) {
     const uint16_t PULSE_MIN_US_MARGIN = 700; //0.7ms
 	const uint16_t PULSE_MAX_US_MARGIN = 2300; //2.3ms
     const uint16_t PULSE_NEUTRAL_US = 1500; // 1.5ms
-    const uint16_t LEFT_CORRECTION = 200; //0.6ms
+    const uint16_t LEFT_CORRECTION = 0; //0.6ms
 
     uint32_t pulse_us_l, pulse_us_r;
 
@@ -241,6 +243,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_I2C1_Init();
   MX_TIM1_Init();
@@ -273,32 +276,36 @@ int main(void)
   int WallTraceWeights[4] = { -1,  -3, 3, 1 }; // 壁トレース用（右-、左+） 検知方向と同じタイヤが動いて欲しいため左右逆転
   int weights[4]          = { 0,  0,  0,  0 }; // 現在の重み
 
-  WRITE_LCD(isRunning, traceType);
+  lcd_clear();
+  lcd_locate(0,0);
+  lcd_printf("Hello");
+  lcd_locate(0,1);
+  lcd_printf("World");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_Delay(100); // 制御周期
+//	  HAL_Delay(100); // 制御周期
+//	  i++;
+//	  lcd_clear();
+//	  lcd_locate(0,1);
+//	  lcd_printf("i = %d", i);
+
 	  WRITE_LCD(isRunning, traceType);
 
-	  // Start
-	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0){
-		 isRunning = true;
-		 WRITE_LCD(isRunning, traceType);
-	  }
+	  // 待機モード
+	  while(1){
+		  HAL_Delay(100); // 制御周期
 
-	  // Stop
-	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 0){
-		  FS90R_SetSpeed(0, 0);
-		  isRunning = false;
-		  WRITE_LCD(isRunning, traceType);
-	  }
+		  // Start
+		  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0){
+			 isRunning = true;
+			 WRITE_LCD(isRunning, traceType);
+			 break;
+		  }
 
-	  //Stopのときのみ調整可能
-	  if(!isRunning){
-		  // LineTraceとWallTraceの切り替え
 		  if(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_15) == 0){
 			  if(traceType == Line){
 				  traceType = Wall;
@@ -312,56 +319,72 @@ int main(void)
 		  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == 0){
 			  ADJUST_GAIN(&Kp);
 			  ADJUST_GAIN(&Kd);
+
+			  WRITE_LCD(isRunning, traceType);	// ゲイン調整終了後、元の画面に戻す
 		  }
-		 continue;
 	  }
 
-	int sum_val = 0, sum_weight = 0;
+	  // 走行モード
+	  while(1){
+		  // Stop
+		  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 0){
+			  FS90R_SetSpeed(0, 0);
+			  isRunning = false;
+			  WRITE_LCD(isRunning, traceType);
+			  break;
+		  }
 
-    // ライントレース or ウォールトレース
-    if(traceType == Line){
-    	sensor_threshold = 1000;
-    	memcpy(weights, LineTraceWeights, sizeof(weights));	// ライントレース
+		int sum_val = 0, sum_weight = 0;
 
-        for(int i=0; i<4; i++){
-            if(analog[i] > sensor_threshold){
-                sum_val += weights[i];
-                sum_weight++;
-            }
-        }
-    }else{
-    	//sensor_threshold = 4000;
-    	memcpy(weights, WallTraceWeights, sizeof(weights));	// ウォールトレース
+	    // ライントレース or ウォールトレース
+	    if(traceType == Line){
+	    	sensor_threshold = 1000;
+	    	memcpy(weights, LineTraceWeights, sizeof(weights));	// ライントレース
 
-        for(int i=0; i<4; i++){
-        	int sensor_value = SENSOR_MAX_VALUE -analog[i];
-            sum_val += (sensor_value * weights[i]);
-            sum_weight += sensor_value;
+	        for(int i=0; i<4; i++){
+	            if(analog[i] > sensor_threshold){
+	                sum_val += weights[i];
+	                sum_weight++;
+	            }
+	        }
+	    }else{
+	    	//sensor_threshold = 4000;
+	    	memcpy(weights, WallTraceWeights, sizeof(weights));	// ウォールトレース
 
-            // 閾値あり
-//            if(analog[i] < sensor_threshold){
-//                sum_val += weights[i];
-//                sum_weight++;
-//            }
-        }
-    }
+	        for(int i=0; i<4; i++){
+	        	int sensor_value = SENSOR_MAX_VALUE -analog[i];
+	            sum_val += (sensor_value * weights[i]);
+	            sum_weight += sensor_value;
 
-    if(sum_weight > 0){
-        error = (float)sum_val / sum_weight; // 平均位置
-    } else {
-        error = last_error; // ライン見失ったら前回値
-    }
+	            // 閾値あり
+	//            if(analog[i] < sensor_threshold){
+	//                sum_val += weights[i];
+	//                sum_weight++;
+	//            }
+	        }
+	    }
 
-    // PD計算
-    float derivative = error - last_error;
-    float correction = Kp*error + Kd*derivative;
+	    if(sum_weight > 0){
+	        error = (float)sum_val / sum_weight; // 平均位置
+	    } else {
+	        error = last_error; // ライン見失ったら前回値
+	    }
 
-    // 左右モータ速度
-    left_speed  = MOTOR_SPEED_BASE + correction;
-    right_speed = MOTOR_SPEED_BASE - correction;
+	    // PD計算
+	    float derivative = error - last_error;
+	    float correction = Kp*error + Kd*derivative;
 
-    FS90R_SetSpeed((int8_t)left_speed, (int8_t)right_speed);
-    last_error = error;
+	    // 左右モータ速度
+	    left_speed  = MOTOR_SPEED_BASE + correction;
+	    right_speed = MOTOR_SPEED_BASE - correction;
+
+	    FS90R_SetSpeed((int8_t)left_speed, (int8_t)right_speed);
+	    last_error = error;
+
+	    // 制御周期
+	    HAL_Delay(20); // 制御周期
+	  }
+
 
     /* USER CODE END WHILE */
 
@@ -436,14 +459,13 @@ static void MX_ADC1_Init(void)
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
   hadc1.Init.LowPowerAutoPowerOff = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_1CYCLE_5;
+  hadc1.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_160CYCLES_5;
   hadc1.Init.OversamplingMode = DISABLE;
   hadc1.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
@@ -559,7 +581,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
+  htim1.Init.Period = 4799;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -567,7 +589,7 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_OC1;
   sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
@@ -690,6 +712,22 @@ static void MX_TIM14_Init(void)
   /* USER CODE BEGIN TIM14_Init 2 */
 
   /* USER CODE END TIM14_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
