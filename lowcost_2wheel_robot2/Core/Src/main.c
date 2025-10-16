@@ -65,8 +65,8 @@ uint16_t mon = 0;
 int left_speed = 0;
 int right_speed = 0;
 // PIDパラメータ（要調整）
-float Kp = 1.5;  // Lineトレースは1.0
-float Kd = 0.5;
+float Kp = 3;  // Lineトレースは1.0
+float Kd = 1;
 
 // ライントレース or ウォールトレース
 typedef enum {
@@ -112,21 +112,17 @@ void FS90R_SetSpeed(int8_t speed_l, int8_t speed_r) {
 	if (speed_r < -100) speed_r = -100;
 
     // パルス幅（μs）範囲
-    //const uint16_t PULSE_MIN_US = 700; //700
     const uint16_t PWM_PERIOD = 20000; //20ms
     const uint16_t PULSE_MIN_US_MARGIN = 700; //0.7ms
 	const uint16_t PULSE_MAX_US_MARGIN = 2300; //2.3ms
     const uint16_t PULSE_NEUTRAL_US = 1500; // 1.5ms
-    const uint16_t LEFT_CORRECTION = 0; //0.6ms
 
     uint32_t pulse_us_l, pulse_us_r;
 
     if (speed_l >= 0) {
-//        pulse_us_l = PULSE_NEUTRAL_US + ((PULSE_NEUTRAL_US - PULSE_MIN_US_MARGIN) * speed_l / 100);
-        pulse_us_l = PULSE_NEUTRAL_US + ((PULSE_NEUTRAL_US - PULSE_MIN_US_MARGIN - LEFT_CORRECTION) * speed_l / 100);
+        pulse_us_l = PULSE_NEUTRAL_US + ((PULSE_NEUTRAL_US - PULSE_MIN_US_MARGIN) * speed_l / 100);
     } else {
-//        pulse_us_l = PULSE_NEUTRAL_US + ((PULSE_MAX_US_MARGIN - PULSE_NEUTRAL_US) * speed_l / 100);
-        pulse_us_l = PULSE_NEUTRAL_US + ((PULSE_MAX_US_MARGIN - PULSE_NEUTRAL_US - LEFT_CORRECTION) * speed_l / 100);
+        pulse_us_l = PULSE_NEUTRAL_US + ((PULSE_MAX_US_MARGIN - PULSE_NEUTRAL_US) * speed_l / 100);
     }
 
     if (speed_r >= 0) {
@@ -197,7 +193,7 @@ void ADJUST_GAIN(float* K){
 
 	  WRITE_GAIN_LCD(Kp, Kd);
 	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0){
-		 if(*K < 3){
+		 if(*K < 5){
 			 *K += 0.1;
 		 }
 	  }
@@ -257,7 +253,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
   lcd_init();
 
-//  // センサースイッチング
+  // センサースイッチング
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 4799); // ひとまず100%
 
@@ -276,23 +272,12 @@ int main(void)
   int WallTraceWeights[4] = { -1,  -3, 3, 1 }; // 壁トレース用（右-、左+） 検知方向と同じタイヤが動いて欲しいため左右逆転
   int weights[4]          = { 0,  0,  0,  0 }; // 現在の重み
 
-  lcd_clear();
-  lcd_locate(0,0);
-  lcd_printf("Hello");
-  lcd_locate(0,1);
-  lcd_printf("World");
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  HAL_Delay(100); // 制御周期
-//	  i++;
-//	  lcd_clear();
-//	  lcd_locate(0,1);
-//	  lcd_printf("i = %d", i);
-
 	  WRITE_LCD(isRunning, traceType);
 
 	  // 待機モード
@@ -338,29 +323,21 @@ int main(void)
 
 	    // ライントレース or ウォールトレース
 	    if(traceType == Line){
-	    	sensor_threshold = 1000;
 	    	memcpy(weights, LineTraceWeights, sizeof(weights));	// ライントレース
 
 	        for(int i=0; i<4; i++){
-	            if(analog[i] > sensor_threshold){
-	                sum_val += weights[i];
-	                sum_weight++;
-	            }
+	        	int sensor_value = analog[i];
+	            sum_val += (sensor_value * weights[i]);
+	            sum_weight += sensor_value;
 	        }
+
 	    }else{
-	    	//sensor_threshold = 4000;
 	    	memcpy(weights, WallTraceWeights, sizeof(weights));	// ウォールトレース
 
 	        for(int i=0; i<4; i++){
 	        	int sensor_value = SENSOR_MAX_VALUE -analog[i];
 	            sum_val += (sensor_value * weights[i]);
 	            sum_weight += sensor_value;
-
-	            // 閾値あり
-	//            if(analog[i] < sensor_threshold){
-	//                sum_val += weights[i];
-	//                sum_weight++;
-	//            }
 	        }
 	    }
 
