@@ -62,11 +62,12 @@ int8_t target_speed = 0;
 uint16_t analog[4];
 uint16_t mon = 0;
 
-int left_speed = 0;
-int right_speed = 0;
 // PIDパラメータ（要調整）
-float Kp = 3;  // Lineトレースは1.0
+float Kp = 7;  // Lineトレースは1.0
 float Kd = 1;
+
+// PID変数
+float error = 0, last_error = 0;
 
 // ライントレース or ウォールトレース
 typedef enum {
@@ -76,11 +77,14 @@ typedef enum {
 
 TraceType traceType = Wall;
 
+// モータースピード
+int default_speed = 10;
 int left_speed;
 int right_speed;
 
 // センサー閾値
 int sensor_threshold = 0;
+float correction = 0.0;
 
 /* USER CODE BEGIN PV */
 
@@ -178,13 +182,20 @@ void WRITE_GAIN_LCD(float Kp, float Kd){
 	  int kp_dec = (int)(Kp * 10) % 10;
 
 	  lcd_locate(0,0);
-	  lcd_printf("Kp = %d.%d", kp_int, kp_dec);
+	  lcd_printf("Kp= %d.%d", kp_int, kp_dec);
 
 	  int kd_int = (int)Kd;
 	  int kd_dec = (int)(Kd * 10) % 10;
 
 	  lcd_locate(0,1);
-	  lcd_printf("Kd = %d.%d", kd_int, kd_dec);
+	  lcd_printf("Kd= %d.%d", kd_int, kd_dec);
+}
+
+void WRITE_SPEED_LCD(){
+	  lcd_clear();
+
+	  lcd_locate(0,0);
+	  lcd_printf("Sp= %d", default_speed);
 }
 
 void ADJUST_GAIN(float* K){
@@ -193,13 +204,34 @@ void ADJUST_GAIN(float* K){
 
 	  WRITE_GAIN_LCD(Kp, Kd);
 	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0){
-		 if(*K < 5){
+		 if(*K < 99){
 			 *K += 0.1;
 		 }
 	  }
 	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 0){
 		  if(*K > 0){
 			  *K -= 0.1;
+		  }
+	  }
+	  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == 0){
+		  break;
+	  }
+  }
+}
+
+void ADJUST_SPEED(){
+  while(1){
+	  HAL_Delay(100); // 制御周期
+
+	  WRITE_SPEED_LCD();
+	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4) == 0){
+		 if(default_speed < 99){
+			 default_speed += 1;
+		 }
+	  }
+	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 0){
+		  if(default_speed > 0){
+			  default_speed -= 1;
 		  }
 	  }
 	  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == 0){
@@ -260,8 +292,7 @@ int main(void)
   // ADCスタート
   HAL_ADC_Start_DMA(&hadc1, (uint32_t *) analog, 4);
 
-  // PID変数
-  float error = 0, last_error = 0;
+
 
   // 走行Mode
   bool isRunning = false;
@@ -300,10 +331,11 @@ int main(void)
 			  WRITE_LCD(isRunning, traceType);
 		  }
 
-		  // ゲイン調整モード
+		  // ゲイン調整&Speed調整モード
 		  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == 0){
 			  ADJUST_GAIN(&Kp);
 			  ADJUST_GAIN(&Kd);
+			  ADJUST_SPEED();
 
 			  WRITE_LCD(isRunning, traceType);	// ゲイン調整終了後、元の画面に戻す
 		  }
@@ -344,16 +376,23 @@ int main(void)
 	    if(sum_weight > 0){
 	        error = (float)sum_val / sum_weight; // 平均位置
 	    } else {
-	        error = last_error; // ライン見失ったら前回値
+	    	if(traceType == Line){
+	    		error = last_error; // ライン見失ったら前回値
+	    	}
+	    	else{
+	    		error = 0;
+	    	}
 	    }
 
 	    // PD計算
 	    float derivative = error - last_error;
-	    float correction = Kp*error + Kd*derivative;
+	    correction = Kp*error + Kd*derivative;
 
 	    // 左右モータ速度
-	    left_speed  = MOTOR_SPEED_BASE + correction;
-	    right_speed = MOTOR_SPEED_BASE - correction;
+	    //left_speed  = MOTOR_SPEED_BASE + correction;
+	    //right_speed = MOTOR_SPEED_BASE - correction;
+	    left_speed  = default_speed + correction;
+	    right_speed = default_speed - correction;
 
 	    FS90R_SetSpeed((int8_t)left_speed, (int8_t)right_speed);
 	    last_error = error;
